@@ -115,6 +115,15 @@ class StopWordsChinese(StopWords):
         import jieba
         return jieba.cut(stripped_input, cut_all=True)
 
+    def get_stopword_count(self, content):
+        '''I change it. '''
+        ws = WordStats()
+        overlapping_stopwords = set(content).intersection(self.STOP_WORDS)
+        ws.set_stopword_count(len(overlapping_stopwords))
+        ws.set_word_count(len(content))
+        ws.set_stop_words(overlapping_stopwords)
+        return ws
+
 
 class StopWordsArabic(StopWords):
     """Arabic segmentation
