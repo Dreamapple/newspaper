@@ -737,6 +737,7 @@ class ContentExtractor(object):
         return set(tags)
 
     def calculate_best_node(self, doc):
+        print("[*] Starting to calculate TopNode")
         top_node = None
         nodes_to_check = self.nodes_to_check(doc)
         starting_boost = float(1.0)
@@ -747,8 +748,7 @@ class ContentExtractor(object):
 
         for node in nodes_to_check:
             text_node = self.parser.getText(node)
-            word_stats = self.stopwords_class(language=self.language).\
-                get_stopword_count(text_node)
+            word_stats = self.stopwords_class(language=self.language).get_stopword_count(text_node)
             high_link_density = self.is_highlink_density(node)
             if word_stats.get_stopword_count() > 2 and not high_link_density:
                 nodes_with_text.append(node)
@@ -756,6 +756,7 @@ class ContentExtractor(object):
         nodes_number = len(nodes_with_text)
         negative_scoring = 0
         bottom_negativescore_nodes = float(nodes_number) * 0.25
+        print("[*] About to inspect num of nodes with text:", nodes_number)
 
         for node in nodes_with_text:
             boost_score = float(0)
@@ -773,10 +774,11 @@ class ContentExtractor(object):
                     negscore = abs(boost_score) + negative_scoring
                     if negscore > 40:
                         boost_score = float(5)
+            print("[*] Location Boost Score: ", boost_score, " on interation: ", i, "attrib is",
+                  node.getparent().attrib)
 
             text_node = self.parser.getText(node)
-            word_stats = self.stopwords_class(language=self.language).\
-                get_stopword_count(text_node)
+            word_stats = self.stopwords_class().get_stopword_count(text_node)
             upscore = int(word_stats.get_stopword_count() + boost_score)
 
             parent_node = self.parser.getParent(node)
@@ -799,6 +801,7 @@ class ContentExtractor(object):
         top_node_score = 0
         for e in parent_nodes:
             score = self.get_score(e)
+            print("[*]", "ParentNode:", e.attrib)
 
             if score > top_node_score:
                 top_node = e
@@ -806,8 +809,12 @@ class ContentExtractor(object):
 
             if top_node is None:
                 top_node = e
+        self.printTraceLog(top_node)
         return top_node
-
+    def printTraceLog(self, topNode):
+        print("[*]", "Our TOPNODE:", topNode.attrib)
+        text = ''.join(topNode.itertext())
+        print("[*]", "Text -", text)
     def is_boostable(self, node):
         """Alot of times the first paragraph might be the caption under an image
         so we'll want to make sure if we're going to boost a parent node that
