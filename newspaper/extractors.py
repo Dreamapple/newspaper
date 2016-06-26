@@ -11,6 +11,8 @@ __author__ = 'Lucas Ou-Yang'
 __license__ = 'MIT'
 __copyright__ = 'Copyright 2014, Lucas Ou-Yang'
 
+logPrefix = "[*] "
+
 from collections import defaultdict
 import copy
 from dateutil.parser import parse as date_parser
@@ -737,10 +739,10 @@ class ContentExtractor(object):
         return set(tags)
 
     def calculate_best_node(self, doc):
-        print("[*] Starting to calculate TopNode")
+        log.info("[*] Starting to calculate TopNode")
         top_node = None
         nodes_to_check = self.nodes_to_check(doc)
-        starting_boost = float(1.0)
+        starting_boost = 1
         cnt = 0
         i = 0
         parent_nodes = []
@@ -755,27 +757,26 @@ class ContentExtractor(object):
 
         nodes_number = len(nodes_with_text)
         negative_scoring = 0
-        bottom_negativescore_nodes = float(nodes_number) * 0.25
-        print("[*] About to inspect num of nodes with text:", nodes_number)
+        bottom_negativescore_nodes = nodes_number / 4
+        log.info("[*] About to inspect num of nodes with text:%d", nodes_number)
 
         for node in nodes_with_text:
-            boost_score = float(0)
+            log.info("[*] before process,"+self.debugNode(node))
+            boost_score = 0
             # boost
             if(self.is_boostable(node)):
-                if cnt >= 0:
-                    boost_score = float((1.0 / starting_boost) * 50)
-                    starting_boost += 1
+                #if cnt >= 0:
+                boost_score = 50 / starting_boost
+                starting_boost += 1
             # nodes_number
             if nodes_number > 15:
-                if (nodes_number - i) <= bottom_negativescore_nodes:
-                    booster = float(
-                        bottom_negativescore_nodes - (nodes_number - i))
-                    boost_score = float(-pow(booster, float(2)))
+                if (nodes_number - i) <= bottom_negativescore_nodes:  # 假设 nodes_number==16,那么最后4个节点会进入这个分支
+                    booster = bottom_negativescore_nodes - (nodes_number - i)
+                    boost_score = -pow(booster, 2)   # boost_score有用
                     negscore = abs(boost_score) + negative_scoring
                     if negscore > 40:
-                        boost_score = float(5)
-            print("[*] Location Boost Score: ", boost_score, " on interation: ", i, "attrib is",
-                  node.getparent().attrib)
+                        boost_score = 5
+            log.info("[*] Location Boost Score: %s on interation: %d,node.attrib is %s", boost_score, i, node.attrib)
 
             text_node = self.parser.getText(node)
             word_stats = self.stopwords_class().get_stopword_count(text_node)
@@ -797,11 +798,14 @@ class ContentExtractor(object):
                     parent_nodes.append(parent_parent_node)
             cnt += 1
             i += 1
+            log.info("[*] after process,t node:"+self.debugNode(node))
+            log.info("[*] after process,p node:" + self.debugNode(parent_node))
+            log.info("[*] after process,ppnode:" + self.debugNode(parent_parent_node))
 
         top_node_score = 0
         for e in parent_nodes:
             score = self.get_score(e)
-            print("[*]", "ParentNode:", e.attrib)
+            log.info("[*] ParentNode:%s"%str(e.attrib))
 
             if score > top_node_score:
                 top_node = e
@@ -812,43 +816,68 @@ class ContentExtractor(object):
         self.printTraceLog(top_node)
         return top_node
     def printTraceLog(self, topNode):
-        print("[*]", "Our TOPNODE:", topNode.attrib)
+        log.info("[*] Our TOPNODE: %s", str(topNode.attrib))
         text = ''.join(topNode.itertext())
-        print("[*]", "Text -", text)
+        if len(text)>90:
+            text=text[:87].replace('\n','\\n')+'...'
+        log.info("[*] Text - "+text)
+    def get_xpath(self, node):
+        if node.attrib.get('id'):
+            return "//%s[id='%s']"%(node.tag, node.attrib['id'])
+        parent = node.getparent()
+        if parent is None:
+            return '/'+node.tag
+        tag = node.tag
+        kids= parent.xpath("./"+tag)
+        if len(kids)==1:
+            path = '/%s' % tag
+        else:
+            for i, nod in enumerate(kids,1):
+                if nod==node:
+                    path = '/%s[%d]'%(tag, i)
+                    break
+            else:
+                raise ValueError
+        return self.get_xpath(parent)+path
+
+    # isOkToBoost
     def is_boostable(self, node):
-        """Alot of times the first paragraph might be the caption under an image
+        """A lot of times the first paragraph might be the caption under an image
         so we'll want to make sure if we're going to boost a parent node that
         it should be connected to other paragraphs, at least for the first n
         paragraphs so we'll want to make sure that the next sibling is a
         paragraph and has at least some substantial weight to it.
         """
         para = "p"
-        steps_away = 0
         minimum_stopword_count = 5
         max_stepsaway_from_node = 3
 
-        nodes = self.walk_siblings(node)
-        for current_node in nodes:
-            # <p>
-            current_node_tag = self.parser.getTag(current_node)
-            if current_node_tag == para:
-                if steps_away >= max_stepsaway_from_node:
-                    return False
-                paraText = self.parser.getText(current_node)
-                word_stats = self.stopwords_class(language=self.language).\
-                    get_stopword_count(paraText)
-                if word_stats.get_stopword_count() > minimum_stopword_count:
-                    return True
-                steps_away += 1
+        # nodes = self.walk_siblings(node)
+        # nodes = [k for k in nodes if k.tag == para]
+        nodes = filter(lambda x:x.tag==para, self.walk_siblings(node))
+        for steps_away, current_node in enumerate(nodes):
+            if steps_away >= max_stepsaway_from_node:
+                log.info("Next paragraph is too far away, not boosting")
+                return False
+            paraText = self.parser.getText(current_node)
+            word_stats = self.stopwords_class(language=self.language).get_stopword_count(paraText)
+            if word_stats.get_stopword_count() > minimum_stopword_count:
+                log.info("We're gonna boost this node, seems contenty")
+                return True
         return False
 
     def walk_siblings(self, node):
         current_sibling = self.parser.previousSibling(node)
-        b = []
+        # b = []
         while current_sibling is not None:
-            b.append(current_sibling)
+            log.info("SIBLINGCHECK: " + self.debugNode(current_sibling))
+            # b.append(current_sibling)
+            yield current_sibling
             current_sibling = self.parser.previousSibling(current_sibling)
-        return b
+        # return b
+
+    def debugNode(self, node):
+        return "node[%s][%s]"%(self.get_xpath(node), node.attrib)
 
     def add_siblings(self, top_node):
         baselinescore_siblings_para = self.get_siblings_score(top_node)
